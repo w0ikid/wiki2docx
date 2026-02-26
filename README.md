@@ -70,7 +70,8 @@ Input file rules:
 ### Option B: Random articles
 
 ```bash
-./wiki2docx -random 10 -out ./output -workers 5 -lang ru
+# Uses aliases: -o for -out, -w for -workers
+./wiki2docx -random 10 -o ./output -w 10 -lang ru
 ```
 
 ## CLI Flags
@@ -78,11 +79,13 @@ Input file rules:
 - `-input string`  
   Path to a `.txt` file with article titles. If set, `-random` is ignored.
 - `-random int`  
-  Number of random articles (default: `1`).
-- `-out string`  
+  Number of random articles (default: `1`). Ensures unique titles.
+- `-out string`, `-output`, `-o`  
   Output directory for `.docx` files (default: `./output`).
-- `-workers int`  
+- `-workers int`, `-worker`, `-w`  
   Number of concurrent workers (default: `5`).
+- `-rate int`  
+  Global rate limit in requests per second (default: `10`). Set to `0` for no limit. Use this to avoid 429 errors when using many workers.
 - `-lang string`  
   Wikipedia language (default: `en`), e.g. `ru`, `de`, `fr`.
 
@@ -97,7 +100,8 @@ Input file rules:
 ```bash
 go mod tidy
 go build -o wiki2docx .
-./wiki2docx -input titles.txt -out ./output -workers 8 -lang en
+# Using short flags for convenience
+./wiki2docx -random 50 -o ./output -w 20 -lang ru
 ls ./output
 ```
 

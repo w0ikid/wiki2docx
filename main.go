@@ -5,29 +5,61 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
-	gowiki "github.com/trietmn/go-wiki"
 	"github.com/w0ikid/wiki2docx/internal/docx"
 	"github.com/w0ikid/wiki2docx/internal/wiki"
 )
 
 func main() {
-	inputFile := flag.String("input", "", "Path to a .txt file with article titles (one per line)")
-	randomN := flag.Int("random", 1, "Number of random articles to fetch (used when -input is not set)")
-	outDir := flag.String("out", "./output", "Directory to save DOCX files")
-	workers := flag.Int("workers", 5, "Number of concurrent workers")
-	lang := flag.String("lang", "en", "Wikipedia language prefix (e.g. en, ru, de)")
+	var (
+		inputFile = flag.String("input", "", "Path to a .txt file with article titles (one per line)")
+		randomN   = flag.Int("random", 1, "Number of random articles to fetch (used when -input is not set)")
+		lang      = flag.String("lang", "en", "Wikipedia language prefix (e.g. en, ru, de)")
+		nWorkers  = flag.Int("workers", 5, "Number of concurrent workers")
+		outDir    = flag.String("out", "./output", "Directory to save DOCX files")
+
+		// Aliases
+		workerAlias = flag.Int("worker", 0, "Alias for -workers")
+		wAlias      = flag.Int("w", 0, "Short alias for -workers")
+		outputAlias = flag.String("output", "", "Alias for -out")
+		oAlias      = flag.String("o", "", "Short alias for -out")
+		rateLimit   = flag.Int("rate", 10, "Global rate limit in requests per second (0 = no limit)")
+	)
 	flag.Parse()
 
-	gowiki.SetLanguage(*lang)
-	// go-wiki defaults to http:// which gets redirected → force https
-	gowiki.SetURL("https://%v.wikipedia.org/w/api.php")
-	gowiki.SetUserAgent("wiki2docx/1.0 (github.com/w0ikid/wiki2docx)")
+	// Merge aliases
+	if *workerAlias != 0 {
+		*nWorkers = *workerAlias
+	}
+	if *wAlias != 0 {
+		*nWorkers = *wAlias
+	}
+	if *outputAlias != "" {
+		*outDir = *outputAlias
+	}
+	if *oAlias != "" {
+		*outDir = *oAlias
+	}
+
+	// Increase the number of idle connections per host to allow true parallelism.
+	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport.MaxIdleConnsPerHost = *nWorkers + 2
+	}
+
+	// Apply settings to our custom wiki package.
+	wiki.SetLanguage(*lang)
+	wiki.SetRateLimit(*rateLimit)
+
+	// Set a reasonable timeout for HTTP requests to prevent hangs.
+	http.DefaultClient.Timeout = 30 * time.Second
 
 	// --- Collect titles ---
+	fmt.Printf("Collecting article titles (random: %d, lang: %s)...\n", *randomN, *lang)
 	titles, err := collectTitles(*inputFile, *randomN)
 	if err != nil {
 		log.Fatalf("Failed to collect titles: %v", err)
@@ -36,7 +68,7 @@ func main() {
 		log.Fatal("No article titles found. Use -input or -random flags.")
 	}
 
-	fmt.Printf("Processing %d article(s) with %d worker(s)...\n", len(titles), *workers)
+	fmt.Printf("Processing %d article(s) with %d worker(s)...\n", len(titles), *nWorkers)
 
 	// --- Worker pool ---
 	titlesCh := make(chan string, len(titles))
@@ -49,7 +81,7 @@ func main() {
 	var mu sync.Mutex
 	var failed []string
 
-	for i := 0; i < *workers; i++ {
+	for i := 0; i < *nWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
